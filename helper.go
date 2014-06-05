@@ -28,6 +28,14 @@ static gboolean idleCb(void *cb) {
 	return FALSE;
 }
 
+static inline GValue* gvalue_new() {
+	return (GValue*)g_slice_alloc0(sizeof(GValue));
+}
+
+gboolean is_object(void *o) {
+	return G_IS_OBJECT(o);
+}
+
 */
 import "C"
 
@@ -93,4 +101,49 @@ func fromGValue(v *C.GValue) (ret interface{}) {
 
 func fromGStr(s *C.gchar) string {
 	return C.GoString((*C.char)(unsafe.Pointer(s)))
+}
+
+var _gstrs = make(map[string]*C.gchar)
+
+func toGStr(s string) *C.gchar {
+	if gstr, ok := _gstrs[s]; ok {
+		return gstr
+	}
+	gstr := (*C.gchar)(unsafe.Pointer(C.CString(s)))
+	_gstrs[s] = gstr
+	return gstr
+}
+
+func ObjSet(o interface{}, name string, value interface{}) {
+	obj := (*C.GObject)(unsafe.Pointer(reflect.ValueOf(o).Pointer()))
+	C.g_object_set_property(obj, toGStr(name), toGValue(value))
+}
+
+func toGValue(v interface{}) *C.GValue {
+	value := C.gvalue_new()
+	switch reflect.TypeOf(v).Kind() {
+	case reflect.String:
+		C.g_value_init(value, C.G_TYPE_STRING)
+		cStr := C.CString(v.(string))
+		defer C.free(unsafe.Pointer(cStr))
+		C.g_value_set_string(value, (*C.gchar)(unsafe.Pointer(cStr)))
+	case reflect.Int:
+		C.g_value_init(value, C.G_TYPE_INT)
+		C.g_value_set_int(value, C.gint(v.(int)))
+	case reflect.Ptr, reflect.UnsafePointer:
+		p := unsafe.Pointer(reflect.ValueOf(v).Pointer())
+		if IsObject(p) {
+			C.g_value_init(value, C.G_TYPE_OBJECT)
+			C.g_value_set_object(value, C.gpointer(p))
+		} else {
+			panic(fmt.Sprintf("unknown pointer type %v", v))
+		}
+	default:
+		panic(fmt.Sprintf("unknown type %v", v)) //TODO
+	}
+	return value
+}
+
+func IsObject(o unsafe.Pointer) bool {
+	return C.is_object(o) == C.TRUE
 }
